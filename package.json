@@ -1,5 +1,5 @@
 {
-  "name": "@hrushiborhade/pingme-cli",
+  "name": "@hrushiborhade/pingme",
   "version": "1.0.1",
   "description": "Get texted when your Claude agent is stuck",
   "type": "module",

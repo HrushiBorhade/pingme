@@ -13,7 +13,7 @@ You're running multiple Claude Code instances across tmux panes. One stops becau
 ## The Solution
 
 ```bash
-npx @hrushiborhade/pingme-cli init
+npx @hrushiborhade/pingme init
 ```
 
 Now your Claude agent texts you when it needs you.
@@ -42,7 +42,7 @@ Each message includes:
 ### 2. Install pingme
 
 ```bash
-npx @hrushiborhade/pingme-cli init
+npx @hrushiborhade/pingme init
 ```
 
 Follow the prompts. Done.
@@ -50,18 +50,18 @@ Follow the prompts. Done.
 ## Commands
 
 ```bash
-npx @hrushiborhade/pingme-cli init       # Setup pingme
-npx @hrushiborhade/pingme-cli test       # Send a test SMS
-npx @hrushiborhade/pingme-cli uninstall  # Remove pingme
-npx @hrushiborhade/pingme-cli --version  # Show version
-npx @hrushiborhade/pingme-cli --help     # Show help
+npx @hrushiborhade/pingme init       # Setup pingme
+npx @hrushiborhade/pingme test       # Send a test SMS
+npx @hrushiborhade/pingme uninstall  # Remove pingme
+npx @hrushiborhade/pingme --version  # Show version
+npx @hrushiborhade/pingme --help     # Show help
 ```
 
 ## How It Works
 
 pingme uses Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code/hooks) to detect when the agent needs your attention.
 
-1. **Installation**: When you run `npx @hrushiborhade/pingme-cli init`, pingme creates:
+1. **Installation**: When you run `npx @hrushiborhade/pingme init`, pingme creates:
    - A bash script at `~/.claude/hooks/pingme.sh` that sends SMS via Twilio
    - Hook entries in `~/.claude/settings.json` that trigger the script
 
@@ -93,13 +93,13 @@ Do you want me to run npm install?
 - Input is sanitized to prevent shell injection
 - SMS requests are made over HTTPS
 
-To update or remove credentials, run `npx @hrushiborhade/pingme-cli init` again or `npx @hrushiborhade/pingme-cli uninstall`.
+To update or remove credentials, run `npx @hrushiborhade/pingme init` again or `npx @hrushiborhade/pingme uninstall`.
 
 ## Troubleshooting
 
 ### SMS not sending
 
-1. **Verify credentials**: Run `npx @hrushiborhade/pingme-cli test` to send a test message
+1. **Verify credentials**: Run `npx @hrushiborhade/pingme test` to send a test message
 2. **Check Twilio balance**: Free trial includes $15 credit; ensure it's not exhausted
 3. **Verify phone numbers**: Both numbers must include country code (e.g., `+1` for US)
 4. **Trial account limitations**: Twilio trial accounts can only send to verified numbers
@@ -119,7 +119,7 @@ The hook script requires `curl`. Install it via your package manager:
 ### Uninstalling
 
 ```bash
-npx @hrushiborhade/pingme-cli uninstall
+npx @hrushiborhade/pingme uninstall
 ```
 
 This removes the hook script and settings entries. Your Twilio credentials are deleted locally.
