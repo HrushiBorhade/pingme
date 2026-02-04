@@ -1,0 +1,52 @@
+{
+  "name": "pingme-cli",
+  "version": "1.0.0",
+  "description": "Get texted when your Claude agent is stuck",
+  "type": "module",
+  "bin": {
+    "pingme": "./bin/pingme.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node bin/pingme.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "sms",
+    "notifications",
+    "twilio",
+    "ai-agents",
+    "cli",
+    "terminal",
+    "productivity"
+  ],
+  "author": "Hrushikesh Borhade",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HrushiBorhade/pingme-cli"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.9.1",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
