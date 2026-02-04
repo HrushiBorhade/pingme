@@ -4,7 +4,7 @@ import { init } from './commands/init.js';
 import { test } from './commands/test.js';
 import { uninstall } from './commands/uninstall.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 
 async function main() {
   const args = process.argv.slice(2);
