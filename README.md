@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Get SMS notifications for all Claude Code agent lifecycle events. No more checking terminals.
+pingme hooks into Claude Code's lifecycle events and texts your phone when your agent actually needs you.
 
 ## The Problem
 
