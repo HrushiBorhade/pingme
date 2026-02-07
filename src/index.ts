@@ -3,8 +3,9 @@ import pc from 'picocolors';
 import { init } from './commands/init.js';
 import { test } from './commands/test.js';
 import { uninstall } from './commands/uninstall.js';
+import { events } from './commands/events.js';
 
-const VERSION = '1.0.1';
+const VERSION = '1.1.0';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -27,6 +28,9 @@ async function main() {
     case 'test':
       await test();
       break;
+    case 'events':
+      await events();
+      break;
     case 'uninstall':
       await uninstall();
       break;
@@ -48,11 +52,13 @@ ${pc.bold('Usage:')} npx pingme-cli ${pc.dim('<command>')}
 
 ${pc.bold('Commands:')}
   ${pc.cyan('init')}        Setup pingme (default)
+  ${pc.cyan('events')}      Configure which events trigger SMS
   ${pc.cyan('test')}        Send a test SMS
   ${pc.cyan('uninstall')}   Remove pingme
 
 ${pc.bold('Examples:')}
   ${pc.dim('$')} npx pingme-cli init
+  ${pc.dim('$')} npx pingme-cli events
   ${pc.dim('$')} npx pingme-cli test
 `);
 }

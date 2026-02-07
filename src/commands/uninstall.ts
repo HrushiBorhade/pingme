@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { unlink, access, constants } from 'fs/promises';
 import { homedir } from 'os';
 import path from 'path';
+import { cleanSettingsJson } from '../utils/install.js';
 
 export async function uninstall() {
   const hookPath = path.join(homedir(), '.claude', 'hooks', 'pingme.sh');
@@ -37,7 +38,6 @@ export async function uninstall() {
 
   try {
     await unlink(hookPath);
-    s.stop('Hook script removed');
   } catch (err) {
     s.stop('Could not remove hook');
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -46,11 +46,13 @@ export async function uninstall() {
     process.exit(1);
   }
 
-  p.note(
-    pc.dim(`Hook entries in ~/.claude/settings.json remain.
-They're harmless, but you can remove them manually if you want.`),
-    'Note'
-  );
+  // Clean up settings.json entries
+  try {
+    await cleanSettingsJson();
+  } catch {
+    // Non-fatal — hook file is already gone
+  }
 
+  s.stop('pingme removed');
   p.outro(pc.dim('pingme uninstalled'));
 }

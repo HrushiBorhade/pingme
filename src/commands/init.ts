@@ -2,6 +2,7 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { installHook } from '../utils/install.js';
 import { sendTestSMS } from '../utils/twilio.js';
+import { ALL_EVENTS, type HookEventDef } from '../utils/events.js';
 
 export async function init() {
   p.log.info(pc.dim('Get your Twilio credentials at: ') + pc.cyan('https://console.twilio.com'));
@@ -55,12 +56,31 @@ export async function init() {
     }
   );
 
+  // Event selection
+  const selectedEvents = await p.multiselect({
+    message: 'Which events should trigger an SMS?',
+    options: ALL_EVENTS.map((evt) => ({
+      value: evt,
+      label: `${evt.emoji}  ${evt.label}`,
+      hint: evt.spammy ? 'spammy' : evt.description,
+    })),
+    initialValues: ALL_EVENTS.filter((e) => e.defaultEnabled),
+    required: true,
+  });
+
+  if (p.isCancel(selectedEvents)) {
+    p.cancel('Setup cancelled.');
+    process.exit(0);
+  }
+
+  const enabledEvents = selectedEvents as HookEventDef[];
+
   const s = p.spinner();
 
   // Install hook
   s.start('Creating hook script');
   try {
-    await installHook(credentials);
+    await installHook(credentials, enabledEvents);
     s.stop('Hook script created');
   } catch (err) {
     s.stop(pc.red('Failed to create hook script'));
@@ -80,10 +100,14 @@ export async function init() {
   }
 
   // Done
+  const eventList = enabledEvents.map((e) => `  ${e.emoji}  ${e.label}`).join('\n');
   p.note(
-    `Your Claude agent will now ping you when it needs attention.
+    `Your Claude agent will now ping you for these events:
+
+${eventList}
 
 ${pc.dim('Commands:')}
+  ${pc.cyan('npx pingme-cli events')}     Change which events trigger SMS
   ${pc.cyan('npx pingme-cli test')}       Send a test SMS
   ${pc.cyan('npx pingme-cli uninstall')}  Remove pingme`,
     'Setup complete'

@@ -1,6 +1,6 @@
 {
   "name": "@hrushiborhade/pingme",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Get texted when your Claude agent is stuck",
   "type": "module",
   "bin": {
@@ -34,7 +34,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/HrushiBorhade/pingme-cli"
+    "url": "https://github.com/HrushiBorhade/pingme"
   },
   "dependencies": {
     "@clack/prompts": "^0.9.1",

@@ -2,8 +2,9 @@ import { writeFile, readFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { homedir } from 'os';
+import { ALL_EVENTS, getDefaultEvents, type HookEventDef } from './events.js';
 
-interface Credentials {
+export interface Credentials {
   twilioSid: string;
   twilioToken: string;
   twilioFrom: string;
@@ -21,11 +22,21 @@ function escapeForBash(str: string): string {
     .replace(/!/g, '\\!');
 }
 
+// Build the case statement entries from all events
+function buildCaseEntries(): string {
+  const entries = ALL_EVENTS.map(
+    (e) => `    ${e.scriptArg}) EMOJI="${e.emoji}"; REASON="${e.label}" ;;`
+  );
+  entries.push(`    test)       EMOJI="🧪"; REASON="Test ping" ;;`);
+  entries.push(`    *)          EMOJI="🔔"; REASON="Needs attention" ;;`);
+  return entries.join('\n');
+}
+
 const HOOK_SCRIPT = `#!/usr/bin/env bash
 
 # ┌───────────────────────────────────────────────────────────────┐
-# │  pingme - Get texted when your Claude agent is stuck          │
-# │  https://github.com/HrushiBorhade/pingme-cli                  │
+# │  pingme - Get texted when your Claude agent needs attention   │
+# │  https://github.com/HrushiBorhade/pingme                     │
 # └───────────────────────────────────────────────────────────────┘
 
 # Config (do not edit manually - use 'npx pingme-cli init' to reconfigure)
@@ -49,29 +60,55 @@ if [ -n "\$TMUX" ]; then
     TMUX_INFO=\$(tmux display-message -p '#S:#I.#P (#W)' 2>/dev/null || echo "")
 fi
 
-# Read context from stdin (limit to 280 chars for SMS)
-CONTEXT=""
+# Read context from stdin
+RAW_INPUT=""
 if [ ! -t 0 ]; then
-    CONTEXT=\$(head -c 280 | tr -cd '[:print:][:space:]')  # Sanitize input
+    RAW_INPUT=\$(cat)
 fi
+
+# Try to extract meaningful context from JSON input using jq
+CONTEXT=""
+if command -v jq &> /dev/null && [ -n "\$RAW_INPUT" ]; then
+    # Try to extract tool_name, message, or other useful fields
+    TOOL_NAME=\$(echo "\$RAW_INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
+    MESSAGE=\$(echo "\$RAW_INPUT" | jq -r '.message // empty' 2>/dev/null)
+    PROMPT=\$(echo "\$RAW_INPUT" | jq -r '.prompt // empty' 2>/dev/null)
+    STOP_REASON=\$(echo "\$RAW_INPUT" | jq -r '.stop_reason // empty' 2>/dev/null)
+
+    if [ -n "\$TOOL_NAME" ]; then
+        CONTEXT="Tool: \$TOOL_NAME"
+    fi
+    if [ -n "\$MESSAGE" ]; then
+        CONTEXT="\${CONTEXT:+\$CONTEXT\\n}\$MESSAGE"
+    fi
+    if [ -n "\$PROMPT" ]; then
+        CONTEXT="\${CONTEXT:+\$CONTEXT\\n}\$PROMPT"
+    fi
+    if [ -n "\$STOP_REASON" ]; then
+        CONTEXT="\${CONTEXT:+\$CONTEXT\\n}Reason: \$STOP_REASON"
+    fi
+fi
+
+# Fallback: use raw input truncated to 280 chars
+if [ -z "\$CONTEXT" ] && [ -n "\$RAW_INPUT" ]; then
+    CONTEXT=\$(echo "\$RAW_INPUT" | head -c 280 | tr -cd '[:print:][:space:]')
+fi
+
+# Truncate context to 280 chars for SMS
+CONTEXT=\$(echo "\$CONTEXT" | head -c 280)
 
 # Message emoji/reason
 case "\$EVENT" in
-    question)   EMOJI="❓"; REASON="Asking question" ;;
-    permission) EMOJI="🔐"; REASON="Needs permission" ;;
-    limit)      EMOJI="⚠️"; REASON="Hit limit" ;;
-    stopped)    EMOJI="🛑"; REASON="Agent stopped" ;;
-    test)       EMOJI="🧪"; REASON="Test ping" ;;
-    *)          EMOJI="🔔"; REASON="Needs attention" ;;
+${buildCaseEntries()}
 esac
 
 # Build message
-MESSAGE="\$EMOJI \$PROJECT"
-[ -n "\$TMUX_INFO" ] && MESSAGE="\$MESSAGE
+SMS="\$EMOJI \$PROJECT"
+[ -n "\$TMUX_INFO" ] && SMS="\$SMS
 📍 \$TMUX_INFO"
-MESSAGE="\$MESSAGE
+SMS="\$SMS
 💬 \$REASON"
-[ -n "\$CONTEXT" ] && MESSAGE="\$MESSAGE
+[ -n "\$CONTEXT" ] && SMS="\$SMS
 
 \$CONTEXT"
 
@@ -81,7 +118,7 @@ MESSAGE="\$MESSAGE
         --user "\$TWILIO_SID:\$TWILIO_TOKEN" \\
         --data-urlencode "From=\$TWILIO_FROM" \\
         --data-urlencode "To=\$MY_PHONE" \\
-        --data-urlencode "Body=\$MESSAGE" \\
+        --data-urlencode "Body=\$SMS" \\
         --max-time 10 \\
         > /dev/null 2>&1
 ) &
@@ -90,73 +127,143 @@ disown 2>/dev/null || true
 exit 0
 `;
 
-export async function installHook(credentials: Credentials): Promise<void> {
-  const homeDir = homedir();
-  const hooksDir = path.join(homeDir, '.claude', 'hooks');
-  const hookPath = path.join(hooksDir, 'pingme.sh');
-  const configPath = path.join(homeDir, '.claude', 'settings.json');
+// Type for hook entries in settings.json
+type HookEntry = {
+  matcher?: string;
+  hooks?: Array<{ type: string; command: string; timeout?: number }>;
+};
+
+function getConfigPath(): string {
+  return path.join(homedir(), '.claude', 'settings.json');
+}
+
+function getHookPath(): string {
+  return path.join(homedir(), '.claude', 'hooks', 'pingme.sh');
+}
+
+async function readConfig(): Promise<Record<string, unknown>> {
+  const configPath = getConfigPath();
+  try {
+    if (existsSync(configPath)) {
+      const existing = await readFile(configPath, 'utf-8');
+      return JSON.parse(existing);
+    }
+  } catch {
+    // Start fresh
+  }
+  return {};
+}
+
+async function writeConfig(config: Record<string, unknown>): Promise<void> {
+  await writeFile(getConfigPath(), JSON.stringify(config, null, 2));
+}
+
+/** Remove all existing pingme hook entries from settings.json */
+function removePingmeHooks(config: Record<string, unknown>): void {
+  const hooks = config.hooks as Record<string, unknown[]> | undefined;
+  if (!hooks) return;
+
+  for (const eventName of Object.keys(hooks)) {
+    if (!Array.isArray(hooks[eventName])) continue;
+    hooks[eventName] = (hooks[eventName] as HookEntry[]).filter(
+      (h) => !h.hooks?.some((hook) => hook.command?.includes('pingme.sh'))
+    );
+    // Clean up empty arrays
+    if ((hooks[eventName] as HookEntry[]).length === 0) {
+      delete hooks[eventName];
+    }
+  }
+
+  // Clean up empty hooks object
+  if (Object.keys(hooks).length === 0) {
+    delete config.hooks;
+  }
+}
+
+/** Add hook entries for the given events */
+function addPingmeHooks(config: Record<string, unknown>, enabledEvents: HookEventDef[]): void {
+  config.hooks = (config.hooks as Record<string, unknown[]>) || {};
+  const hooks = config.hooks as Record<string, HookEntry[]>;
+
+  for (const evt of enabledEvents) {
+    hooks[evt.event] = hooks[evt.event] || [];
+
+    const entry: HookEntry = {
+      hooks: [{ type: 'command', command: `~/.claude/hooks/pingme.sh ${evt.scriptArg}`, timeout: 10000 }],
+    };
+    if (evt.matcher) {
+      entry.matcher = evt.matcher;
+    }
+
+    hooks[evt.event].push(entry);
+  }
+}
+
+export async function installHook(
+  credentials: Credentials,
+  enabledEvents?: HookEventDef[]
+): Promise<void> {
+  const hooksDir = path.join(homedir(), '.claude', 'hooks');
+  const hookPath = getHookPath();
 
   // Create hooks directory
   await mkdir(hooksDir, { recursive: true });
 
   // Create hook script with escaped credentials (prevents shell injection)
-  const script = HOOK_SCRIPT
-    .replaceAll('{{TWILIO_SID}}', escapeForBash(credentials.twilioSid))
+  const script = HOOK_SCRIPT.replaceAll('{{TWILIO_SID}}', escapeForBash(credentials.twilioSid))
     .replaceAll('{{TWILIO_TOKEN}}', escapeForBash(credentials.twilioToken))
     .replaceAll('{{TWILIO_FROM}}', escapeForBash(credentials.twilioFrom))
     .replaceAll('{{MY_PHONE}}', escapeForBash(credentials.myPhone));
 
   await writeFile(hookPath, script, { mode: 0o755 });
 
-  // Update Claude config
-  let config: Record<string, unknown> = {};
+  // Update Claude settings.json
+  const events = enabledEvents || getDefaultEvents();
+  const config = await readConfig();
 
-  try {
-    if (existsSync(configPath)) {
-      const existing = await readFile(configPath, 'utf-8');
-      config = JSON.parse(existing);
-    }
-  } catch {
-    // Start fresh
-  }
+  // Remove old pingme hooks, then add new ones
+  removePingmeHooks(config);
+  addPingmeHooks(config, events);
 
-  // Initialize hooks with Claude Code 2.1+ format
-  // Format: { matcher: "ToolName" (regex string), hooks: [{ type: "command", command: "..." }] }
-  config.hooks = (config.hooks as Record<string, unknown[]>) || {};
-  const hooks = config.hooks as Record<string, unknown[]>;
-  hooks.PostToolUse = hooks.PostToolUse || [];
-  hooks.Stop = hooks.Stop || [];
-
-  // Type for hook format
-  type HookEntry = {
-    matcher?: string;
-    hooks?: Array<{ type: string; command: string }>;
-  };
-
-  const postToolHooks = hooks.PostToolUse as HookEntry[];
-  const stopHooks = hooks.Stop as HookEntry[];
-
-  // Check if pingme hook already exists (check in hooks array)
-  const hasPingmePostTool = postToolHooks.some((h) =>
-    h.hooks?.some((hook) => hook.command?.includes('pingme.sh'))
-  );
-
-  const hasPingmeStop = stopHooks.some((h) =>
-    h.hooks?.some((hook) => hook.command?.includes('pingme.sh'))
-  );
-
-  if (!hasPingmePostTool) {
-    postToolHooks.push({
-      matcher: 'AskUserQuestion',
-      hooks: [{ type: 'command', command: '~/.claude/hooks/pingme.sh question' }],
-    });
-  }
-
-  if (!hasPingmeStop) {
-    stopHooks.push({
-      hooks: [{ type: 'command', command: '~/.claude/hooks/pingme.sh stopped' }],
-    });
-  }
-
-  await writeFile(configPath, JSON.stringify(config, null, 2));
+  await writeConfig(config);
 }
+
+/** Update which events are enabled in settings.json without rewriting the script */
+export async function updateEvents(enabledEvents: HookEventDef[]): Promise<void> {
+  const config = await readConfig();
+  removePingmeHooks(config);
+  addPingmeHooks(config, enabledEvents);
+  await writeConfig(config);
+}
+
+/** Read currently enabled events from settings.json */
+export function getEnabledEvents(config: Record<string, unknown>): HookEventDef[] {
+  const hooks = config.hooks as Record<string, HookEntry[]> | undefined;
+  if (!hooks) return [];
+
+  const enabled: HookEventDef[] = [];
+
+  for (const evt of ALL_EVENTS) {
+    const eventHooks = hooks[evt.event];
+    if (!Array.isArray(eventHooks)) continue;
+
+    const hasPingme = eventHooks.some((h) =>
+      h.hooks?.some((hook) => hook.command?.includes('pingme.sh'))
+    );
+    if (hasPingme) {
+      enabled.push(evt);
+    }
+  }
+
+  return enabled;
+}
+
+/** Remove all pingme entries from settings.json (for uninstall) */
+export async function cleanSettingsJson(): Promise<void> {
+  const config = await readConfig();
+  removePingmeHooks(config);
+  await writeConfig(config);
+}
+
+// Re-export for backward compatibility
+export { escapeForBash as _escapeForBash };

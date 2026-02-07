@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Get texted when your Claude Code agent needs attention. No more checking terminals.
+Get SMS notifications for all Claude Code agent lifecycle events. No more checking terminals.
 
 ## The Problem
 
@@ -20,16 +20,31 @@ Now your Claude agent texts you when it needs you.
 
 ## What You Get
 
-SMS notifications when:
-- Agent stops
-- Agent asks a clarifying question
-- Agent needs permission
-- Agent hits rate limits
+SMS notifications for **14 Claude Code hook events** — you choose which ones:
+
+**Enabled by default:**
+- ✅ **Task completed** — agent finished a task
+- 🛑 **Agent stopped** — agent stopped running
+- ❓ **Asking question** — agent is asking you a question
+- 🔔 **Notification** — agent sent a notification
+- 🔐 **Needs permission** — agent needs your permission to proceed
+
+**Available (off by default):**
+- ❌ Tool failed
+- 🤖 Subagent finished
+- 🔴 Session ended
+- 🟢 Session started
+- 🚀 Subagent started
+- 💤 Teammate idle
+- 📦 Pre-compact
+- 📝 Prompt submitted (spammy)
+- 🔧 Pre tool use (spammy)
 
 Each message includes:
-- **Project name** - which codebase needs you
-- **tmux context** - which pane to jump to
-- **Reason** - what the agent needs
+- **Project name** — which codebase needs you
+- **tmux context** — which pane to jump to
+- **Reason** — what the agent needs
+- **Context** — extracted from JSON input (tool name, message, etc.) when `jq` is available
 
 ## Setup
 
@@ -45,14 +60,15 @@ Each message includes:
 npx @hrushiborhade/pingme init
 ```
 
-Follow the prompts. Done.
+Follow the prompts — pick your Twilio creds, then choose which events should trigger an SMS. Done.
 
 ## Commands
 
 ```bash
 npx @hrushiborhade/pingme init       # Setup pingme
+npx @hrushiborhade/pingme events     # Change which events trigger SMS
 npx @hrushiborhade/pingme test       # Send a test SMS
-npx @hrushiborhade/pingme uninstall  # Remove pingme
+npx @hrushiborhade/pingme uninstall  # Remove pingme (hook + settings)
 npx @hrushiborhade/pingme --version  # Show version
 npx @hrushiborhade/pingme --help     # Show help
 ```
@@ -63,26 +79,29 @@ pingme uses Claude Code's [hooks system](https://docs.anthropic.com/en/docs/clau
 
 1. **Installation**: When you run `npx @hrushiborhade/pingme init`, pingme creates:
    - A bash script at `~/.claude/hooks/pingme.sh` that sends SMS via Twilio
-   - Hook entries in `~/.claude/settings.json` that trigger the script
+   - Hook entries in `~/.claude/settings.json` for each selected event
 
-2. **Hook Triggers**: Two hooks are configured:
-   - `PostToolUse` with `AskUserQuestion` matcher - triggers when Claude asks you a question
-   - `Stop` - triggers when Claude stops execution for any reason
+2. **Hook Triggers**: Hooks are configured for your selected events. For example:
+   - `TaskCompleted` — triggers when a task finishes
+   - `PostToolUse` with `AskUserQuestion` matcher — triggers when Claude asks you a question
+   - `Stop` — triggers when Claude stops execution
+   - `PermissionRequest` — triggers when Claude needs permission
+   - ...and any other events you enable
 
 3. **Notification Flow**: When triggered, the hook script:
    - Detects your current project name from the working directory
    - Captures tmux session/window/pane info (if available)
+   - Extracts context from JSON stdin using `jq` (with raw text fallback)
    - Sends an SMS via Twilio's API with context about what needs attention
+
+4. **Reconfiguration**: Run `npx @hrushiborhade/pingme events` anytime to change which events trigger SMS — no need to re-enter Twilio credentials.
 
 ## Example SMS
 
 ```
-[question emoji] agentQ
-
-[location emoji] dev:2.1 (main)
-[message emoji] Asking question
-
-Do you want me to run npm install?
+✅ agentQ
+📍 dev:2.1 (main)
+💬 Task completed
 ```
 
 ## Security
@@ -122,7 +141,7 @@ The hook script requires `curl`. Install it via your package manager:
 npx @hrushiborhade/pingme uninstall
 ```
 
-This removes the hook script and settings entries. Your Twilio credentials are deleted locally.
+This removes the hook script and cleans up all hook entries from `~/.claude/settings.json`.
 
 ## Requirements
 
@@ -130,6 +149,7 @@ This removes the hook script and settings entries. Your Twilio credentials are d
 - Twilio account (free trial includes $15 credit)
 - Claude Code CLI
 - `curl` (pre-installed on most systems)
+- `jq` (optional — enables richer context extraction from JSON input)
 
 ## Contributing
 
@@ -147,11 +167,12 @@ Contributions are welcome! Here's how to get started:
 ### Development
 
 ```bash
-git clone https://github.com/HrushiBorhade/pingme-cli.git
-cd pingme-cli
+git clone https://github.com/HrushiBorhade/pingme.git
+cd pingme
 npm install
 npm run dev    # Watch mode for TypeScript
 npm run build  # Build for production
+npm test       # Run tests
 ```
 
 ### Ideas for Contribution
