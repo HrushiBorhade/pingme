@@ -5,7 +5,7 @@ import { test } from './commands/test.js';
 import { uninstall } from './commands/uninstall.js';
 import { events } from './commands/events.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 
 async function main() {
   const args = process.argv.slice(2);
