@@ -2,7 +2,7 @@
 
 ## Reporting Security Issues
 
-If you discover a security vulnerability in pingme-cli, please report it by emailing [your-email@example.com] or opening a private security advisory on GitHub.
+If you discover a security vulnerability in @hrushiborhade/pingme, please report it by emailing hrushiborhade123@gmail.com or opening a private security advisory on GitHub.
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
@@ -17,7 +17,7 @@ If you discover a security vulnerability in pingme-cli, please report it by emai
 
 ### Credential Storage
 
-pingme-cli stores Twilio credentials in plaintext in the hook script at `~/.claude/hooks/pingme.sh`. This is necessary for the hook to function, but comes with security implications:
+@hrushiborhade/pingme stores Twilio credentials in plaintext in the hook script at `~/.claude/hooks/pingme.sh`. This is necessary for the hook to function, but comes with security implications:
 
 - **File Permissions**: The hook script has `0o700` permissions (readable/writable/executable only by the owner)
 - **Home Directory Security**: Ensure your home directory has proper permissions (`chmod 700 ~`)
@@ -26,7 +26,7 @@ pingme-cli stores Twilio credentials in plaintext in the hook script at `~/.clau
 
 ### Shell Injection Prevention
 
-pingme-cli implements comprehensive shell injection prevention:
+@hrushiborhade/pingme implements comprehensive shell injection prevention:
 
 - All credentials are escaped using `escapeForBash()` before being written to the hook script
 - The following metacharacters are properly escaped: `" $ ` \ !`
@@ -49,7 +49,7 @@ pingme-cli implements comprehensive shell injection prevention:
 
 ### Dependencies
 
-pingme-cli has a minimal dependency footprint to reduce attack surface:
+@hrushiborhade/pingme has a minimal dependency footprint to reduce attack surface:
 
 - Only 2 production dependencies: `@clack/prompts`, `picocolors`
 - Both dependencies are audited regularly with `npm audit`
@@ -58,7 +58,7 @@ pingme-cli has a minimal dependency footprint to reduce attack surface:
 ### Rate Limiting
 
 - **Twilio API**: Rate limiting is handled by Twilio's built-in API limits
-- **Hook Cooldown**: Currently not implemented (users can disable spammy events via `npx pingme-cli events`)
+- **Hook Cooldown**: Currently not implemented (users can disable spammy events via `npx @hrushiborhade/pingme events`)
 - **Recommended**: Add custom rate limiting if needed for high-frequency events
 
 ### External Dependencies (Runtime)
@@ -71,12 +71,12 @@ The hook script requires these system utilities:
 
 ## Security Best Practices
 
-When using pingme-cli:
+When using @hrushiborhade/pingme:
 
 1. **Secure Your Home Directory**: `chmod 700 ~`
 2. **Rotate Credentials**: Regularly rotate your Twilio credentials
 3. **Monitor Usage**: Check Twilio logs for unexpected SMS sends
-4. **Disable When Not Needed**: Use `npx pingme-cli events` to disable events you don't need
+4. **Disable When Not Needed**: Use `npx @hrushiborhade/pingme events` to disable events you don't need
 5. **Shared Systems**: Avoid using on untrusted multi-user systems
 6. **Review Hook Script**: Periodically review `~/.claude/hooks/pingme.sh` for unexpected changes
 
@@ -103,15 +103,15 @@ When using pingme-cli:
 Security updates are released as patch versions (e.g., 1.1.x). To update:
 
 ```bash
-npm install -g pingme-cli@latest
+npm install -g @hrushiborhade/pingme@latest
 ```
 
 After updating, reconfigure to regenerate the hook script with latest security fixes:
 
 ```bash
-npx pingme-cli init
+npx @hrushiborhade/pingme init
 ```
 
 ## Contact
 
-For security-related questions or concerns, please contact [your-email@example.com] or open a GitHub issue (for non-sensitive questions).
+For security-related questions or concerns, please contact hrushiborhade123@gmail.com or open a GitHub issue (for non-sensitive questions).
