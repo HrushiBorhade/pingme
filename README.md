@@ -110,11 +110,17 @@ pingme uses Claude Code's [hooks system](https://docs.anthropic.com/en/docs/clau
 
 ## Security
 
-- Credentials are stored locally in `~/.claude/hooks/pingme.sh`
-- Credentials are never sent to any server except Twilio's API
-- The hook script only runs when Claude Code triggers it
-- Input is sanitized to prevent shell injection
-- SMS requests are made over HTTPS
+pingme implements comprehensive security measures:
+
+- **Credential Storage**: Stored locally in `~/.claude/hooks/pingme.sh` with `0o700` permissions (owner-only access)
+- **Shell Injection Prevention**: All credentials are escaped before being written to the hook script
+- **Input Validation**: Twilio credentials and phone numbers are validated with strict regex patterns
+- **File Integrity**: Write operations are verified and protected against symlink attacks
+- **JSON Validation**: Configuration files are validated for proper structure with error recovery
+- **No Network Access**: Only communicates with Twilio's API over HTTPS
+- **Minimal Dependencies**: Only 2 production dependencies to reduce attack surface
+
+For more details, see [SECURITY.md](SECURITY.md).
 
 ## Troubleshooting
 

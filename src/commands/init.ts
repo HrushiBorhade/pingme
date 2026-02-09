@@ -15,7 +15,9 @@ export async function init() {
           placeholder: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
           validate: (value) => {
             if (!value) return 'Required';
-            if (!value.startsWith('AC')) return 'Should start with AC';
+            if (!value.match(/^AC[a-z0-9]{32}$/i)) {
+              return 'Invalid SID format (should be 34 alphanumeric chars starting with AC)';
+            }
           },
         }),
 
@@ -24,7 +26,9 @@ export async function init() {
           message: 'Twilio Auth Token',
           validate: (value) => {
             if (!value) return 'Required';
-            if (value.length < 20) return 'Token seems too short';
+            if (!value.match(/^[a-z0-9]{32}$/i)) {
+              return 'Invalid token format (should be 32 alphanumeric chars)';
+            }
           },
         }),
 
@@ -34,7 +38,9 @@ export async function init() {
           placeholder: '+14155238886',
           validate: (value) => {
             if (!value) return 'Required';
-            if (!value.startsWith('+')) return 'Include country code (e.g., +1...)';
+            if (!value.match(/^\+\d{1,15}$/)) {
+              return 'Invalid phone format (e.g., +14155238886)';
+            }
           },
         }),
 
@@ -44,7 +50,9 @@ export async function init() {
           placeholder: '+1234567890',
           validate: (value) => {
             if (!value) return 'Required';
-            if (!value.startsWith('+')) return 'Include country code (e.g., +1...)';
+            if (!value.match(/^\+\d{1,15}$/)) {
+              return 'Invalid phone format (e.g., +1234567890)';
+            }
           },
         }),
     },

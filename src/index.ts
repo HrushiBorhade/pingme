@@ -1,11 +1,19 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { init } from './commands/init.js';
 import { test } from './commands/test.js';
 import { uninstall } from './commands/uninstall.js';
 import { events } from './commands/events.js';
 
-const VERSION = '1.1.1';
+// Read version from package.json (single source of truth)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageJson = JSON.parse(
+  readFileSync(join(__dirname, '../package.json'), 'utf-8')
+);
+const VERSION = packageJson.version;
 
 async function main() {
   const args = process.argv.slice(2);

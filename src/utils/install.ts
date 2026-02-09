@@ -1,4 +1,4 @@
-import { writeFile, readFile, mkdir } from 'fs/promises';
+import { writeFile, readFile, mkdir, access, constants, stat, lstat } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { homedir } from 'os';
@@ -144,30 +144,79 @@ function getHookPath(): string {
 async function readConfig(): Promise<Record<string, unknown>> {
   const configPath = getConfigPath();
   try {
-    if (existsSync(configPath)) {
-      const existing = await readFile(configPath, 'utf-8');
-      return JSON.parse(existing);
+    const existing = await readFile(configPath, 'utf-8');
+    const parsed = JSON.parse(existing);
+
+    // Validate structure
+    if (typeof parsed !== 'object' || parsed === null) {
+      console.warn('[pingme] Settings file has invalid format - using defaults');
+      return {};
     }
-  } catch {
-    // Start fresh
+
+    return parsed;
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    if (error.code === 'ENOENT') {
+      // File doesn't exist - this is expected on first install
+      return {};
+    }
+    if (err instanceof SyntaxError) {
+      console.error('[pingme] Settings file is corrupted (invalid JSON)');
+      console.error(`[pingme] Backup found at ${configPath}.bak`);
+      console.error('[pingme] Using default configuration');
+    } else {
+      console.warn(`[pingme] Failed to read settings: ${error.message}`);
+    }
+    return {};
   }
-  return {};
 }
 
 async function writeConfig(config: Record<string, unknown>): Promise<void> {
-  await writeFile(getConfigPath(), JSON.stringify(config, null, 2));
+  const configPath = getConfigPath();
+  const configDir = path.dirname(configPath);
+
+  // Check write permission first
+  try {
+    await access(configDir, constants.W_OK);
+  } catch {
+    throw new Error(`Cannot write to ${configPath} - check permissions`);
+  }
+
+  await writeFile(configPath, JSON.stringify(config, null, 2));
+
+  // Verify write succeeded
+  const stats = await stat(configPath);
+  if (stats.size === 0) {
+    throw new Error('Config file is empty after write');
+  }
 }
 
 /** Remove all existing pingme hook entries from settings.json */
 function removePingmeHooks(config: Record<string, unknown>): void {
-  const hooks = config.hooks as Record<string, unknown[]> | undefined;
-  if (!hooks) return;
+  if (!config.hooks || typeof config.hooks !== 'object') {
+    return; // No hooks to remove
+  }
+
+  const hooks = config.hooks as Record<string, unknown>;
 
   for (const eventName of Object.keys(hooks)) {
-    if (!Array.isArray(hooks[eventName])) continue;
-    hooks[eventName] = (hooks[eventName] as HookEntry[]).filter(
+    const eventHooks = hooks[eventName];
+
+    // Validate structure before manipulating
+    if (!Array.isArray(eventHooks)) {
+      console.warn(`[pingme] Unexpected structure in hooks.${eventName} - skipping`);
+      continue;
+    }
+
+    // Type guard
+    const validHooks = eventHooks.filter((h): h is HookEntry => {
+      return typeof h === 'object' && h !== null && 'hooks' in h;
+    });
+
+    hooks[eventName] = validHooks.filter(
       (h) => !h.hooks?.some((hook) => hook.command?.includes('pingme.sh'))
     );
+
     // Clean up empty arrays
     if ((hooks[eventName] as HookEntry[]).length === 0) {
       delete hooks[eventName];
@@ -209,13 +258,31 @@ export async function installHook(
   // Create hooks directory
   await mkdir(hooksDir, { recursive: true });
 
+  // SECURITY: Verify it's not a symlink
+  const stats = await lstat(hooksDir);
+  if (stats.isSymbolicLink()) {
+    throw new Error(
+      'Security: ~/.claude/hooks is a symlink. Refusing to install. ' +
+        'Remove the symlink and try again.'
+    );
+  }
+
   // Create hook script with escaped credentials (prevents shell injection)
   const script = HOOK_SCRIPT.replaceAll('{{TWILIO_SID}}', escapeForBash(credentials.twilioSid))
     .replaceAll('{{TWILIO_TOKEN}}', escapeForBash(credentials.twilioToken))
     .replaceAll('{{TWILIO_FROM}}', escapeForBash(credentials.twilioFrom))
     .replaceAll('{{MY_PHONE}}', escapeForBash(credentials.myPhone));
 
-  await writeFile(hookPath, script, { mode: 0o755 });
+  await writeFile(hookPath, script, { mode: 0o700 });
+
+  // Verify write succeeded
+  const hookStats = await stat(hookPath);
+  if (hookStats.size === 0) {
+    throw new Error('Hook script is empty after write');
+  }
+  if ((hookStats.mode & 0o700) !== 0o700) {
+    throw new Error('Hook script has incorrect permissions');
+  }
 
   // Update Claude settings.json
   const events = enabledEvents || getDefaultEvents();

@@ -24,8 +24,14 @@ export async function events() {
       const existing = await readFile(configPath, 'utf-8');
       config = JSON.parse(existing);
     }
-  } catch {
-    // Fresh config
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException | SyntaxError;
+    if (error instanceof SyntaxError) {
+      p.log.warn('Settings file is corrupted - using defaults');
+    } else if ('code' in error && error.code !== 'ENOENT') {
+      p.log.warn(`Failed to read settings: ${error.message}`);
+    }
+    // Use fresh config
   }
 
   const currentlyEnabled = getEnabledEvents(config);
