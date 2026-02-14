@@ -10,7 +10,7 @@ export async function test() {
 
   if (!existsSync(hookPath)) {
     p.log.error('pingme is not installed');
-    p.log.info(`Run ${pc.cyan('npx pingme-cli init')} to set up`);
+    p.log.info(`Run ${pc.cyan('npx @hrushiborhade/pingme init')} to set up`);
     process.exit(1);
   }
 
@@ -18,7 +18,7 @@ export async function test() {
   s.start('Sending test SMS');
 
   try {
-    execSync(`echo "🧪 Test ping from pingme-cli" | "${hookPath}" test`, {
+    execSync(`echo "🧪 Test ping from pingme" | "${hookPath}" test`, {
       timeout: 15000,
       stdio: 'ignore',
     });
@@ -34,7 +34,7 @@ export async function test() {
     } else {
       p.log.error('SMS send failed - check your Twilio credentials');
     }
-    p.log.info(`Run ${pc.cyan('npx pingme-cli init')} to reconfigure`);
+    p.log.info(`Run ${pc.cyan('npx @hrushiborhade/pingme init')} to reconfigure`);
     process.exit(1);
   }
 

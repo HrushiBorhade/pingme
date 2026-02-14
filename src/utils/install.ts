@@ -39,7 +39,7 @@ const HOOK_SCRIPT = `#!/usr/bin/env bash
 # │  https://github.com/HrushiBorhade/pingme                     │
 # └───────────────────────────────────────────────────────────────┘
 
-# Config (do not edit manually - use 'npx pingme-cli init' to reconfigure)
+# Config (do not edit manually - use 'npx @hrushiborhade/pingme init' to reconfigure)
 TWILIO_SID="{{TWILIO_SID}}"
 TWILIO_TOKEN="{{TWILIO_TOKEN}}"
 TWILIO_FROM="{{TWILIO_FROM}}"

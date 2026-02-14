@@ -11,12 +11,12 @@ describe('CLI Commands', () => {
   describe('version', () => {
     it('should display version with --version', () => {
       const output = execSync(`node "${cliPath}" --version`, { encoding: 'utf-8' });
-      expect(output.trim()).toMatch(/^pingme-cli v\d+\.\d+\.\d+$/);
+      expect(output.trim()).toMatch(/^pingme v\d+\.\d+\.\d+$/);
     });
 
     it('should display version with -v', () => {
       const output = execSync(`node "${cliPath}" -v`, { encoding: 'utf-8' });
-      expect(output.trim()).toMatch(/^pingme-cli v\d+\.\d+\.\d+$/);
+      expect(output.trim()).toMatch(/^pingme v\d+\.\d+\.\d+$/);
     });
   });
 

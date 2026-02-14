@@ -115,9 +115,9 @@ export async function init() {
 ${eventList}
 
 ${pc.dim('Commands:')}
-  ${pc.cyan('npx pingme-cli events')}     Change which events trigger SMS
-  ${pc.cyan('npx pingme-cli test')}       Send a test SMS
-  ${pc.cyan('npx pingme-cli uninstall')}  Remove pingme`,
+  ${pc.cyan('npx @hrushiborhade/pingme events')}     Change which events trigger SMS
+  ${pc.cyan('npx @hrushiborhade/pingme test')}       Send a test SMS
+  ${pc.cyan('npx @hrushiborhade/pingme uninstall')}  Remove pingme`,
     'Setup complete'
   );
 

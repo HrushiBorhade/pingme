@@ -21,7 +21,7 @@ async function main() {
 
   // Version flag (no header needed)
   if (command === '--version' || command === '-v') {
-    console.log(`pingme-cli v${VERSION}`);
+    console.log(`pingme v${VERSION}`);
     return;
   }
 
@@ -56,7 +56,7 @@ async function main() {
 
 function showHelp() {
   console.log(`
-${pc.bold('Usage:')} npx pingme-cli ${pc.dim('<command>')}
+${pc.bold('Usage:')} npx @hrushiborhade/pingme ${pc.dim('<command>')}
 
 ${pc.bold('Commands:')}
   ${pc.cyan('init')}        Setup pingme (default)
@@ -65,9 +65,9 @@ ${pc.bold('Commands:')}
   ${pc.cyan('uninstall')}   Remove pingme
 
 ${pc.bold('Examples:')}
-  ${pc.dim('$')} npx pingme-cli init
-  ${pc.dim('$')} npx pingme-cli events
-  ${pc.dim('$')} npx pingme-cli test
+  ${pc.dim('$')} npx @hrushiborhade/pingme init
+  ${pc.dim('$')} npx @hrushiborhade/pingme events
+  ${pc.dim('$')} npx @hrushiborhade/pingme test
 `);
 }
 

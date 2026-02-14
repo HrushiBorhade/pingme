@@ -76,7 +76,7 @@ function getErrorCode(err: unknown): TestErrorCode {
 function getErrorMessage(errorCode: TestErrorCode, originalError?: string): string {
   switch (errorCode) {
     case 'HOOK_NOT_FOUND':
-      return 'Hook script not found. Run "npx pingme-cli init" to set up.';
+      return 'Hook script not found. Run "npx @hrushiborhade/pingme init" to set up.';
     case 'TIMEOUT':
       return `Request timed out after ${TIMEOUT_MS / 1000} seconds. Check your network connection or Twilio service status.`;
     case 'NETWORK_ERROR':
@@ -84,7 +84,7 @@ function getErrorMessage(errorCode: TestErrorCode, originalError?: string): stri
     case 'PERMISSION_DENIED':
       return 'Permission denied. Check that the hook script is executable (chmod +x ~/.claude/hooks/pingme.sh).';
     case 'SCRIPT_ERROR':
-      return 'Hook script failed. Check your Twilio credentials with "npx pingme-cli init".';
+      return 'Hook script failed. Check your Twilio credentials with "npx @hrushiborhade/pingme init".';
     case 'UNKNOWN':
     default:
       return originalError || 'An unexpected error occurred while sending SMS.';

@@ -13,7 +13,7 @@ export async function events() {
 
   if (!existsSync(hookPath)) {
     p.log.error('pingme is not installed');
-    p.log.info(`Run ${pc.cyan('npx pingme-cli init')} to set up`);
+    p.log.info(`Run ${pc.cyan('npx @hrushiborhade/pingme init')} to set up`);
     process.exit(1);
   }
 
