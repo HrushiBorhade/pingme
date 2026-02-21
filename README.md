@@ -1,6 +1,6 @@
 # pingme
 
-pingme hooks into Claude Code's lifecycle events and texts your phone when your agent actually needs you.
+Voice calling for Claude Code — phone rings when agents need you, talk through decisions, instructions route back to the right tmux session.
 
 [![npm version](https://img.shields.io/npm/v/@hrushiborhade/pingme)](https://www.npmjs.com/package/@hrushiborhade/pingme)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -9,164 +9,162 @@ pingme hooks into Claude Code's lifecycle events and texts your phone when your 
 
 You're running multiple Claude Code instances across tmux panes. One stops because it needs permission or has a question. You think it's still working. Hours later, you find it blocked. Time wasted.
 
+## The Solution
+
+**pingme calls your phone.** Not a text — an actual phone call. A voice agent tells you exactly what's happening: "Your frontend session wants to run `npm run build`. Should I approve?" You say yes, it routes back. All from your phone.
+
 ## Quick Start
 
 ```bash
-npx @hrushiborhade/pingme init
+npx @hrushiborhade/pingme init    # Setup (Bolna API key, phone number)
+npx @hrushiborhade/pingme start   # Start daemon + tunnel
 ```
 
-Follow the prompts — enter your Twilio credentials, choose which events should trigger an SMS, and you're done.
+That's it. When Claude Code needs you, your phone rings.
 
-## Supported Events
+## How It Works
 
-SMS notifications for **14 Claude Code hook events** — you choose which ones:
+```
+Claude Code hooks → daemon (port 7331) → decision engine → Bolna API → phone call
+Your voice → Bolna STT → Custom LLM (our bridge) → Claude Sonnet → response
+Voice agent → Custom Functions → daemon → tmux send-keys → back to Claude Code
+```
 
-**Enabled by default:**
-| Event | Description |
-|-------|-------------|
-| ✅ Task completed | Agent finished a task |
-| 🛑 Agent stopped | Agent stopped running |
-| ❓ Asking question | Agent is asking you a question |
-| 🔔 Notification | Agent sent a notification |
-| 🔐 Needs permission | Agent needs your permission to proceed |
+1. **Hooks** capture Claude Code lifecycle events (permission requests, questions, stops)
+2. **Decision engine** evaluates: is the session genuinely blocked? Only calls for permission/question events — normal stops are silent
+3. **Bolna AI** places the call with a voice agent that has live session context
+4. **Custom LLM bridge** injects real-time session data into every voice response
+5. **Custom Functions** let the voice agent check sessions, route instructions, and approve/deny — all through your daemon
 
-**Available (off by default):**
-| Event | Description |
-|-------|-------------|
-| ❌ Tool failed | A tool call failed |
-| 🤖 Subagent finished | A subagent finished running |
-| 🔴 Session ended | Claude Code session ended |
-| 🟢 Session started | Claude Code session started |
-| 🚀 Subagent started | A subagent started running |
-| 💤 Teammate idle | A teammate agent is idle |
-| 📦 Pre-compact | Context is about to be compacted |
-| 📝 Prompt submitted | User submitted a prompt (spammy) |
-| 🔧 Pre tool use | About to use a tool (spammy) |
+## What the Voice Agent Knows
 
-Each SMS includes:
-- **Project name** — which codebase needs you
-- **tmux context** — which pane to jump to (if applicable)
-- **Reason** — what the agent needs
-- **Context** — extracted from JSON input via `jq` (with raw text fallback)
+The agent doesn't just say "your session stopped." It extracts the full context:
+
+| Event | What the agent says |
+|-------|-------------------|
+| Bash permission | "Frontend wants to run `npm run build`. Approve karun?" |
+| File write | "Backend wants to create `/src/utils/auth.ts`. Should I approve?" |
+| Question with options | "Claude is asking: which section should we build? Option 1: Call History, Option 2: Knowledge Base" |
+| Unexpected stop | "Your API session stopped unexpectedly" |
+
+Normal `end_turn` stops? Ignored. No annoying calls when Claude finishes its job.
 
 ## Commands
 
 ```bash
-npx @hrushiborhade/pingme init       # Setup pingme
-npx @hrushiborhade/pingme events     # Change which events trigger SMS
-npx @hrushiborhade/pingme test       # Send a test SMS
-npx @hrushiborhade/pingme uninstall  # Remove pingme (hook + settings)
-npx @hrushiborhade/pingme --version  # Show version
-npx @hrushiborhade/pingme --help     # Show help
+pingme start            # Start daemon + Cloudflare tunnel
+pingme stop             # Stop daemon
+pingme status           # Show sessions, call state, uptime
+pingme call             # Trigger manual outbound call
+pingme name <pane> <n>  # Rename a session for voice-friendly IDs
+pingme logs [-f]        # Tail daemon logs
+pingme config           # Show/edit YAML configuration
+pingme init             # First-time setup
 ```
 
-## How It Works
+## Architecture
 
-pingme uses Claude Code's [hooks system](https://docs.anthropic.com/en/docs/claude-code/hooks) to detect when the agent needs your attention.
+| Component | Purpose |
+|-----------|---------|
+| **Daemon Server** | Express on port 7331, 9 routes, auth middleware |
+| **Session Registry** | Tracks all Claude Code sessions with rich pending action context |
+| **Decision Engine** | Event → action routing (call/batch/sms/ignore) |
+| **Call Manager** | Batch timer, Bolna outbound call triggering |
+| **Context Bridge** | `/v1/chat/completions` — Anthropic → OpenAI format for Bolna Custom LLM |
+| **Custom Functions** | 3 Bolna tools: `get_sessions`, `route_instruction`, `trigger_action` |
+| **Hook System** | Bash scripts using `jq` for safe JSON, installed in `~/.claude/settings.json` |
+| **Cloudflare Tunnel** | Free, no rate limits, exposes daemon to Bolna |
 
-1. **Installation** — `npx @hrushiborhade/pingme init` creates:
-   - A bash script at `~/.claude/hooks/pingme.sh` that sends SMS via Twilio
-   - Hook entries in `~/.claude/settings.json` for each selected event
+## Configuration
 
-2. **Hook Triggers** — Hooks are registered for your selected events:
-   - `TaskCompleted` — when a task finishes
-   - `PostToolUse` (matcher: `AskUserQuestion`) — when Claude asks a question
-   - `Stop` — when Claude stops execution
-   - `PermissionRequest` — when Claude needs permission
-   - ...and any other events you enable
+Config lives at `~/.pingme/config.yaml`:
 
-3. **Notification Flow** — When triggered, the hook script:
-   - Detects your current project name from the working directory
-   - Captures tmux session/window/pane info (if available)
-   - Extracts context from JSON stdin using `jq` (with raw text fallback)
-   - Sends an SMS via Twilio's API
-
-4. **Reconfiguration** — Run `npx @hrushiborhade/pingme events` anytime to change which events trigger SMS without re-entering Twilio credentials.
-
-## Example SMS
-
+```yaml
+mode: voice
+phone: "+91XXXXXXXXXX"
+bolna:
+  api_key: bn-xxxxx
+  agent_id: xxxxx
+bridge:
+  provider: anthropic
+  model: claude-haiku-4-5-20251001
+  max_tokens: 150
+policy:
+  cooldown_seconds: 60
+  batch_window_seconds: 10
+  call_on:
+    permission: true    # Session blocked — needs approval
+    question: true      # Session blocked — needs answer
+    stopped: false      # Normal stops are silent
+    task_completed: false
+  quiet_hours:
+    enabled: true
+    start: "23:00"
+    end: "07:00"
+    mode: sms
 ```
-✅ agentQ
-📍 dev:2.1 (main)
-💬 Task completed
-```
 
-## Setup
+## Voice & Language
 
-### Prerequisites
+pingme speaks **Hinglish** by default — natural Hindi-English mix, the way Indian developers talk.
 
-- Node.js 18+
-- [Twilio account](https://console.twilio.com) (free trial includes $15 credit)
-- Claude Code CLI
-- `curl` (pre-installed on most systems)
-- `jq` (optional — enables richer context extraction from JSON input)
+- **STT**: Deepgram `nova-3` with `language: "multi"` for Hindi-English code-switching
+- **TTS**: ElevenLabs `eleven_turbo_v2_5` with Daksh (conversational Hindi male voice)
+- **LLM**: Your configured bridge model with Hinglish system prompt
 
-### Twilio Configuration
-
-1. Sign up at [twilio.com/console](https://console.twilio.com)
-2. Get your Account SID and Auth Token from the dashboard
-3. Get a phone number (or use the trial number)
-4. Run `npx @hrushiborhade/pingme init` and follow the prompts
+Keyword boosting for developer terms: tmux, Claude, pane, session, approve, deny, haan, nahi.
 
 ## Security
 
-pingme implements comprehensive security measures:
+- **Bearer token auth** on all sensitive routes (constant-time comparison)
+- **Instruction blocklist**: 30+ destructive patterns (`rm -rf`, `sudo`, `git push -f`, etc.)
+- **Webhook validation**: execution ID matching with age-check fallback
+- **tmux target validation**: regex check on all pane/session identifiers
+- **Atomic state writes**: unique temp filenames per write, no partial reads
+- **Queue depth limit**: max 200 queued instructions
+- **No IP-based auth bypass**: cloudflared makes everything localhost, so all routes require Bearer token
 
-- **Credential Storage**: Stored locally in `~/.claude/hooks/pingme.sh` with `0o700` permissions (owner-only access)
-- **Shell Injection Prevention**: All credentials are escaped before being written to the hook script
-- **Input Validation**: Twilio credentials and phone numbers are validated with strict regex patterns
-- **File Integrity**: Write operations are verified and protected against symlink attacks
-- **JSON Validation**: Configuration files are validated for proper structure with error recovery
-- **No Network Access**: Only communicates with Twilio's API over HTTPS
-- **Minimal Dependencies**: Only 2 production dependencies to reduce attack surface
+## Supported Hook Events
 
-For more details, see [SECURITY.md](SECURITY.md).
+**Call-triggering (enabled by default):**
+| Event | Description |
+|-------|-------------|
+| Permission request | Agent needs your permission to proceed |
+| Question (PreToolUse) | Agent is about to ask you a question |
 
-## Troubleshooting
+**Silent by default (configurable):**
+| Event | Description |
+|-------|-------------|
+| Task completed | Agent finished a task |
+| Agent stopped | Agent stopped running |
+| Tool failed | A tool call failed |
+| Notification | Agent sent a notification |
+| Subagent start/stop | Subagent lifecycle |
+| Session start/end | Session lifecycle |
 
-### SMS not sending
+## Prerequisites
 
-1. Run `npx @hrushiborhade/pingme test` to verify credentials
-2. Check your Twilio balance (free trial includes $15 credit)
-3. Verify both phone numbers include country code (e.g., `+1` for US)
-4. Twilio trial accounts can only send to verified numbers
+- Node.js 18+
+- [Bolna AI account](https://bolna.ai) with API key and agent ID
+- [Anthropic API key](https://console.anthropic.com) for the bridge LLM
+- Claude Code CLI
+- `jq` (for hook script JSON construction)
+- `tmux` (for multi-session management)
 
-### Hook not triggering
-
-1. Restart Claude Code — hooks are loaded on startup
-2. Verify hooks are present in `~/.claude/settings.json`
-3. Check script permissions: `chmod +x ~/.claude/hooks/pingme.sh`
-
-### curl not found
-
-Install via your package manager:
-- macOS: `brew install curl` (usually pre-installed)
-- Ubuntu/Debian: `sudo apt install curl`
-
-## Contributing
-
-Contributions are welcome.
+## Development
 
 ```bash
 git clone https://github.com/HrushiBorhade/pingme.git
 cd pingme
 npm install
-npm run dev    # Watch mode
-npm run build  # Build for production
-npm test       # Run tests
+npm run build      # TypeScript compile
+npm test           # Vitest (42 tests)
+npx tsc --noEmit   # Type check only
 ```
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes and run `npm run build && npm test`
-4. Open a Pull Request
+## Tech Stack
 
-### Ideas for Contribution
-
-- Support for other notification providers (Slack, Discord, Pushover)
-- Rate limiting to prevent SMS spam
-- Quiet hours configuration
-- Custom message templates
+TypeScript, Express 5, Node 18+, Anthropic Claude Sonnet, Bolna AI, Cloudflare Tunnel, Winston, YAML config.
 
 ## License
 
