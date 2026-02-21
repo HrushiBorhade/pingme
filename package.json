@@ -43,10 +43,15 @@
     "url": "git+https://github.com/HrushiBorhade/pingme.git"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@clack/prompts": "^0.9.1",
-    "picocolors": "^1.1.1"
+    "express": "^5.2.1",
+    "picocolors": "^1.1.1",
+    "winston": "^3.19.0",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^20.10.0",
     "@vitest/coverage-v8": "^4.0.18",
     "typescript": "^5.3.0",

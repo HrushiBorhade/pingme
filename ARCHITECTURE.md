@@ -50,6 +50,35 @@ Layer 2: pingme Daemon (local server — the brain)
 Layer 3: Bolna AI (cloud voice pipeline — phone/STT/TTS/telephony)
 ```
 
+```mermaid
+graph TB
+    subgraph "Layer 3 — Cloud"
+        Phone["📱 Your Phone"]
+        Bolna["☁️ Bolna AI<br/>(STT / TTS / Telephony)"]
+    end
+
+    subgraph "Layer 2 — Local Machine"
+        Daemon["🧠 pingme Daemon<br/>localhost:7331"]
+        Tunnel["🔒 Cloudflare Tunnel"]
+    end
+
+    subgraph "Layer 1 — Terminal"
+        S1["Claude Code<br/>Session 1"]
+        S2["Claude Code<br/>Session 2"]
+        S3["Claude Code<br/>Session 3"]
+    end
+
+    Phone <-->|"cellular"| Bolna
+    Bolna <-->|"HTTPS"| Tunnel
+    Tunnel <-->|"localhost"| Daemon
+    S1 -->|"hook events"| Daemon
+    S2 -->|"hook events"| Daemon
+    S3 -->|"hook events"| Daemon
+    Daemon -->|"tmux send-keys"| S1
+    Daemon -->|"tmux send-keys"| S2
+    Daemon -->|"tmux send-keys"| S3
+```
+
 **Key architectural decision**: The daemon is the brain, not Claude Code and not Bolna's built-in LLM. Bolna's Custom LLM feature points at the daemon, which has full context of all sessions and decides what to say.
 
 This is fundamentally different from the call-me plugin where Claude Code itself is the voice brain. We can't do that because:
@@ -60,6 +89,78 @@ This is fundamentally different from the call-me plugin where Claude Code itself
 ---
 
 ## 3. Architecture Diagram
+
+### Mermaid — Component View
+
+```mermaid
+graph TB
+    subgraph Phone["📱 Your Phone"]
+        Call["Voice Call"]
+    end
+
+    subgraph Bolna["☁️ Bolna AI (Cloud)"]
+        Telephony["Telephony<br/>(Twilio/Exotel/Plivo)"]
+        STT["STT<br/>(Deepgram/Whisper)"]
+        TTS["TTS<br/>(ElevenLabs)"]
+        AgentLoop["Agent Loop<br/>(manages turns)"]
+        CustomLLM["Custom LLM Endpoint<br/>POST /v1/chat/completions"]
+        CustomFns["Custom Functions<br/>get_sessions | route_instruction | trigger_action"]
+    end
+
+    subgraph Daemon["🧠 pingme Daemon (localhost:7331)"]
+        Server["Express Server"]
+        Bridge["Context Bridge<br/>/v1/chat/completions"]
+        SessionReg["Session Registry"]
+        DecisionEng["Decision Engine"]
+        CallMgr["Call Manager"]
+        CtxBuilder["Context Builder"]
+        TmuxCtrl["tmux Controller"]
+        State["State Persistence<br/>~/.pingme/state.json"]
+    end
+
+    subgraph Claude["🖥️ Claude Code Sessions (tmux)"]
+        CS1["Session: frontend<br/>Pane: main:0.0"]
+        CS2["Session: api<br/>Pane: main:1.0"]
+        CS3["Session: infra<br/>Pane: work:0.0"]
+    end
+
+    subgraph Anthropic["Anthropic API"]
+        Claude_API["Claude Sonnet<br/>(Bridge LLM)"]
+    end
+
+    Call <--> Telephony
+    Telephony <--> STT
+    STT <--> AgentLoop
+    AgentLoop <--> TTS
+    TTS <--> Telephony
+    AgentLoop <--> CustomLLM
+    AgentLoop <--> CustomFns
+
+    CustomLLM -->|"HTTPS via tunnel"| Bridge
+    CustomFns -->|"HTTPS via tunnel"| Server
+
+    Bridge --> CtxBuilder
+    Bridge -->|"Anthropic SDK"| Claude_API
+    Claude_API -->|"streaming SSE"| Bridge
+
+    Server --> SessionReg
+    Server --> DecisionEng
+    Server --> CallMgr
+    Server --> TmuxCtrl
+    Server --> State
+
+    CS1 -->|"hook script POST"| Server
+    CS2 -->|"hook script POST"| Server
+    CS3 -->|"hook script POST"| Server
+
+    TmuxCtrl -->|"tmux send-keys"| CS1
+    TmuxCtrl -->|"tmux send-keys"| CS2
+    TmuxCtrl -->|"tmux send-keys"| CS3
+
+    CallMgr -->|"POST /call"| Bolna
+```
+
+### ASCII — Detailed Wiring
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -317,6 +418,46 @@ interface CallPolicy {
 
 **Batching logic**: When an event arrives, the daemon waits `batch_window_seconds` before making the call. If more events arrive during that window, they're batched into a single call. This prevents 5 sessions finishing at the same time from triggering 5 separate calls.
 
+```mermaid
+gantt
+    title Event Batching (Debounce) — 10s window
+    dateFormat X
+    axisFormat %Ls
+
+    section Normal batch
+    Session A stops        :milestone, 0, 0
+    Timer starts (10s)     :a1, 0, 10
+    Session B stops        :milestone, 3, 3
+    Timer resets (10s)     :a2, 3, 13
+    Timer expires → CALL   :milestone, 13, 13
+
+    section High priority interrupts batch
+    Session A stops        :milestone, 20, 20
+    Timer starts (10s)     :b1, 20, 30
+    Session C asks question:milestone, 25, 25
+    Timer CANCELLED        :crit, 25, 25
+    CALL immediately       :milestone, 25, 25
+```
+
+```mermaid
+flowchart LR
+    E1["Event arrives"] --> Add["Add to batch"]
+    Add --> Timer{"Timer<br/>running?"}
+    Timer -->|"Yes"| Reset["Reset timer<br/>(debounce)"]
+    Timer -->|"No"| Start["Start 10s timer"]
+    Reset --> Wait["Wait..."]
+    Start --> Wait
+
+    Wait --> Expire["Timer expires"]
+    Expire --> Flush["Flush batch → ONE call<br/>with combined reason"]
+
+    HP["HIGH priority event<br/>(permission/question)"] --> Cancel["Cancel timer"]
+    Cancel --> CallNow["Call immediately"]
+
+    style HP fill:#ff6b6b,color:#fff
+    style CallNow fill:#ff6b6b,color:#fff
+```
+
 ```
 Event arrives → Start 10s timer
   More events arrive → Reset timer, batch events
@@ -374,6 +515,36 @@ async function sendToSession(
 
 Evaluates incoming events and decides the notification strategy.
 
+```mermaid
+flowchart TD
+    Start["Hook Event Arrives"] --> Silent{"session_start or<br/>session_end?"}
+    Silent -->|Yes| Ignore["🔇 IGNORE"]
+    Silent -->|No| ActiveCall{"Active call<br/>in progress?"}
+
+    ActiveCall -->|Yes| Batch["📦 BATCH<br/>inject into call context"]
+    ActiveCall -->|No| Quiet{"Quiet hours?"}
+
+    Quiet -->|Yes, mode=sms| SMS1["📱 SMS"]
+    Quiet -->|Yes, mode=silent| Ignore2["🔇 IGNORE"]
+    Quiet -->|No| Cooldown{"Last call < cooldown<br/>seconds ago?"}
+
+    Cooldown -->|Yes| SMS2["📱 SMS<br/>(too soon to call again)"]
+    Cooldown -->|No| Priority{"Event type?"}
+
+    Priority -->|permission / question| CallHigh["📞 CALL<br/>priority: HIGH<br/>(cancel batch, call now)"]
+    Priority -->|stopped / task_completed| BatchNormal["📦 BATCH<br/>priority: NORMAL<br/>(10s debounce timer)"]
+    Priority -->|other| SMS3["📱 SMS<br/>(fallback)"]
+
+    style CallHigh fill:#ff6b6b,color:#fff
+    style BatchNormal fill:#ffd93d,color:#000
+    style SMS1 fill:#6bcb77,color:#fff
+    style SMS2 fill:#6bcb77,color:#fff
+    style SMS3 fill:#6bcb77,color:#fff
+    style Ignore fill:#ccc,color:#333
+    style Ignore2 fill:#ccc,color:#333
+    style Batch fill:#4ecdc4,color:#fff
+```
+
 ```typescript
 type NotifyAction =
   | { type: 'call'; reason: string; priority: 'high' | 'normal' }
@@ -421,6 +592,50 @@ function decide(event: HookEvent, state: DaemonState): NotifyAction {
 ## 5. Data Flows
 
 ### 5.1 Outbound Call (Claude → You)
+
+```mermaid
+sequenceDiagram
+    participant CC as Claude Code<br/>(tmux session)
+    participant Hook as Hook Script<br/>(pingme.sh)
+    participant D as Daemon<br/>(localhost:7331)
+    participant DE as Decision Engine
+    participant CM as Call Manager
+    participant B as Bolna AI
+    participant P as Your Phone
+    participant Bridge as Context Bridge
+    participant A as Anthropic API
+
+    CC->>Hook: fires Stop hook
+    Hook->>D: POST /hooks/event<br/>{event:"stopped", project:"api"}
+    D->>D: Update Session Registry
+    D->>DE: decide(event, state, policy)
+    DE-->>D: {type:"batch", event}
+    D->>CM: addToBatch(event)
+    CM->>CM: Start 10s debounce timer
+
+    Note over CM: ...timer expires...
+
+    CM->>B: POST api.bolna.ai/call<br/>{agent_id, phone}
+    B->>P: 📞 Ring ring!
+    P->>B: User picks up
+    B->>Bridge: POST /v1/chat/completions<br/>(OpenAI format)
+    Bridge->>Bridge: Build system prompt<br/>with live sessions
+    Bridge->>A: messages.stream()<br/>(Anthropic format)
+    A-->>Bridge: Streaming response
+    Bridge-->>B: SSE chunks<br/>(OpenAI format)
+    B->>P: 🔊 "Your API session stopped..."
+
+    P->>B: 🎤 "Tell it to run tests"
+    B->>D: POST /route<br/>{session:"api", instruction:"run tests"}
+    D->>D: Safety check + find session
+    D->>CC: tmux send-keys "run tests" Enter
+    D-->>B: {success: true}
+    B->>P: 🔊 "Done, sent to API session"
+
+    P->>B: "Thanks, bye"
+    B->>D: POST /webhooks/bolna<br/>{status:"completed"}
+    D->>D: Clear active_call, log history
+```
 
 ```
 Claude Code session stops
@@ -494,6 +709,44 @@ Call ends → Bolna webhook → Daemon logs call
 
 ### 5.2 Inbound Call (You → Claude)
 
+```mermaid
+sequenceDiagram
+    participant P as Your Phone
+    participant B as Bolna AI
+    participant Bridge as Context Bridge
+    participant A as Anthropic API
+    participant D as Daemon
+    participant CC as Claude Code
+
+    P->>B: 📞 Dial inbound number
+    B->>P: Agent answers
+    B->>Bridge: POST /v1/chat/completions
+    Bridge->>Bridge: Build system prompt<br/>(all sessions injected)
+    Bridge->>A: Anthropic messages.stream()
+    A-->>Bridge: "You have 3 sessions running..."
+    Bridge-->>B: SSE → OpenAI format
+    B->>P: 🔊 Status report
+
+    P->>B: 🎤 "What's the frontend doing?"
+    B->>D: GET /sessions?name=frontend
+    D-->>B: {sessions: [{status: "active", last_tool: "Write"}]}
+    B->>Bridge: POST /v1/chat/completions (with tool result)
+    Bridge->>A: Stream
+    A-->>Bridge: "It's writing checkout-form.tsx..."
+    Bridge-->>B: SSE
+    B->>P: 🔊 Detailed status
+
+    P->>B: 🎤 "Queue Stripe integration for it"
+    B->>D: POST /route<br/>{session:"frontend", instruction:"add Stripe", queue_if_busy:true}
+    D->>D: Session busy → queue instruction
+    D-->>B: {success:true, queued:true}
+    B->>P: 🔊 "Queued for delivery when it stops"
+
+    Note over D,CC: Later, frontend stops...
+    CC->>D: POST /hooks/event {event:"stopped"}
+    D->>CC: tmux send-keys "add Stripe integration" Enter
+```
+
 ```
 You dial the Bolna inbound number (+91XXXXXXXXXX)
   │
@@ -542,6 +795,35 @@ Daemon queues instruction (will send via tmux when session stops)
 
 ### 5.3 Mid-Call Event (New event during active call)
 
+```mermaid
+sequenceDiagram
+    participant CC1 as Claude Code<br/>(frontend)
+    participant D as Daemon
+    participant Bridge as Context Bridge
+    participant B as Bolna AI
+    participant P as Your Phone
+
+    Note over P,B: You're on a call about the API session...
+
+    CC1->>D: POST /hooks/event<br/>{event:"permission", project:"frontend"}
+    D->>D: active_call exists → inject event
+    D->>D: events_during_call.push(...)
+
+    Note over D,Bridge: Next LLM turn picks up the new event
+
+    P->>B: 🎤 (user says something)
+    B->>Bridge: POST /v1/chat/completions
+    Bridge->>Bridge: buildSystemPrompt() now includes<br/>"NEW EVENTS DURING THIS CALL:<br/>- frontend: permission"
+    Bridge-->>B: "Hold on — frontend just asked<br/>permission for npm install stripe"
+    B->>P: 🔊 Interrupts to report new event
+
+    P->>B: 🎤 "Yes, approve it"
+    B->>D: POST /action {session:"frontend", action:"approve"}
+    D->>CC1: tmux send-keys "y" Enter
+    D-->>B: {success: true}
+    B->>P: 🔊 "Approved."
+```
+
 ```
 You're on a call discussing the API session
   │
@@ -569,6 +851,32 @@ Daemon: tmux send-keys -t main:0.0 "y" Enter
 ```
 
 ### 5.4 Instruction Queuing (Session busy)
+
+```mermaid
+sequenceDiagram
+    participant P as Your Phone
+    participant B as Bolna AI
+    participant D as Daemon
+    participant Q as Instruction Queue
+    participant CC as Claude Code<br/>(API session)
+
+    P->>B: 🎤 "Tell API to refactor auth middleware"
+    B->>D: POST /route<br/>{session:"api", instruction:"refactor auth", queue_if_busy:true}
+    D->>D: Check: API session status = "active" (busy)
+    D->>Q: Push {instruction, deliver_on:"next_stop"}
+    D-->>B: {success:true, queued:true}
+    B->>P: 🔊 "Queued for when it stops"
+
+    Note over CC,D: Time passes... API session finishes
+
+    CC->>D: POST /hooks/event {event:"stopped"}
+    D->>D: registerOrUpdate → status:"stopped"
+    D->>Q: Check for pending instructions
+    Q-->>D: Found: "refactor auth middleware"
+    D->>D: Re-check safety filter (defense in depth)
+    D->>CC: tmux send-keys "refactor auth middleware" Enter
+    D->>Q: Mark delivered, save state
+```
 
 ```
 You (on call): "Tell the API session to refactor the auth middleware"
@@ -752,6 +1060,44 @@ interface CallRecord {
 
 ### 7.2 Session Lifecycle
 
+```mermaid
+stateDiagram-v2
+    [*] --> active : SessionStart hook
+
+    active --> active : PreToolUse / PostToolUse
+    active --> stopped : Stop hook
+    active --> asking : PostToolUse (AskUserQuestion)
+    active --> permission : PermissionRequest hook
+    active --> ended : SessionEnd hook
+
+    stopped --> active : SessionStart / any tool event
+    stopped --> ended : SessionEnd hook
+    stopped --> [*] : stale (30min no events)
+
+    asking --> active : user answers
+    asking --> ended : SessionEnd hook
+
+    permission --> active : user approves/denies
+    permission --> ended : SessionEnd hook
+
+    ended --> [*]
+
+    note right of stopped
+        Queued instructions
+        delivered here
+    end note
+
+    note right of asking
+        Decision engine:
+        HIGH priority call
+    end note
+
+    note right of permission
+        Decision engine:
+        HIGH priority call
+    end note
+```
+
 ```
 SessionStart hook fires
   → Create new SessionState (status: active)
@@ -799,6 +1145,39 @@ async function saveState(state: DaemonState): Promise<void> {
 ---
 
 ## 8. Hook System
+
+```mermaid
+flowchart LR
+    subgraph CC["Claude Code"]
+        Event["Hook Event fires<br/>(Stop, Permission, etc.)"]
+    end
+
+    subgraph Hook["~/.pingme/hooks/pingme.sh"]
+        direction TB
+        Cap["Capture: $1=event<br/>$PWD, $TMUX vars"]
+        Stdin["Read stdin<br/>(JSON payload)"]
+        JSON["Build JSON via jq<br/>(or Python fallback)"]
+        Curl["curl POST to daemon<br/>with Bearer token"]
+        BG["Run in background<br/>( ... ) & disown"]
+    end
+
+    subgraph Daemon["Daemon :7331"]
+        Validate["Validate token<br/>+ tmux target"]
+        Register["Update session<br/>registry"]
+        Decide["Decision engine"]
+    end
+
+    subgraph Fallback["Fallback"]
+        SMS["SMS via<br/>sms-fallback.sh"]
+    end
+
+    Event -->|"settings.json<br/>hook config"| Cap
+    Cap --> Stdin --> JSON --> BG
+    BG --> Curl
+    Curl -->|"HTTP 200"| Validate
+    Curl -->|"HTTP != 200<br/>(daemon down)"| SMS
+    Validate --> Register --> Decide
+```
 
 ### 8.1 Supported Events
 
@@ -910,6 +1289,42 @@ The `pingme init` command installs hooks in `~/.claude/settings.json`:
 ## 9. Context Bridge (Custom LLM)
 
 This is the core innovation. Bolna's Custom LLM feature sends standard OpenAI-compatible chat completion requests to your endpoint. Your daemon responds with context-aware messages.
+
+```mermaid
+flowchart LR
+    subgraph Bolna["Bolna AI"]
+        BA["Agent Loop"]
+    end
+
+    subgraph Bridge["pingme Bridge (/v1/chat/completions)"]
+        direction TB
+        Recv["Receive OpenAI<br/>messages array"]
+        Extract["Extract system msg<br/>+ user/assistant msgs"]
+        Inject["Inject live session<br/>context into system prompt"]
+        Convert1["Convert OpenAI msgs<br/>→ Anthropic format"]
+        Stream["Stream Anthropic<br/>response"]
+        Convert2["Convert Anthropic chunks<br/>→ OpenAI SSE format"]
+    end
+
+    subgraph Anthropic["Anthropic API"]
+        Claude["Claude Sonnet"]
+    end
+
+    subgraph Sessions["Live State"]
+        SR["Session Registry<br/>(all sessions)"]
+        AC["Active Call<br/>(mid-call events)"]
+    end
+
+    BA -->|"OpenAI format<br/>POST"| Recv
+    Recv --> Extract
+    Extract --> Inject
+    Sessions -.->|"dynamic context"| Inject
+    Inject --> Convert1
+    Convert1 -->|"Anthropic format"| Claude
+    Claude -->|"streaming"| Stream
+    Stream --> Convert2
+    Convert2 -->|"OpenAI SSE<br/>data: {...}"| BA
+```
 
 ### 9.1 Endpoint: POST /v1/chat/completions
 
@@ -1027,6 +1442,45 @@ function convertToOpenAIStreamFormat(anthropicChunk: any): object {
 ## 10. Voice Agent Tools (Custom Functions)
 
 Bolna Custom Functions let the voice agent call back into the daemon during conversation. These are configured in Bolna's Tools Tab.
+
+```mermaid
+flowchart TB
+    subgraph Voice["During a Phone Call"]
+        User["🎤 User speaks"]
+        Agent["🤖 Voice Agent<br/>(decides to use tool)"]
+    end
+
+    subgraph Tools["3 Custom Functions"]
+        direction TB
+        GS["get_sessions<br/>GET /sessions"]
+        RI["route_instruction<br/>POST /route"]
+        TA["trigger_action<br/>POST /action"]
+    end
+
+    subgraph Daemon["Daemon Actions"]
+        direction TB
+        Read["Read session<br/>registry"]
+        Send["tmux send-keys<br/>(instruction text)"]
+        Queue["Queue instruction<br/>(if session busy)"]
+        Approve["Send 'y' to tmux"]
+        Deny["Send 'n' to tmux"]
+        Cancel["Send Ctrl+C to tmux"]
+    end
+
+    User --> Agent
+    Agent --> GS --> Read
+    Agent --> RI
+    RI --> Send
+    RI --> Queue
+    Agent --> TA
+    TA -->|"approve"| Approve
+    TA -->|"deny"| Deny
+    TA -->|"cancel"| Cancel
+
+    Read -.->|"session data<br/>back to agent"| Agent
+    Send -.->|"success/fail"| Agent
+    Queue -.->|"queued confirmation"| Agent
+```
 
 ### 10.1 get_sessions — Fetch current session state
 
@@ -1272,6 +1726,33 @@ app.post('/action', authMiddleware, async (req, res) => {
 
 ## 11. Tunnel & Networking
 
+```mermaid
+flowchart LR
+    subgraph Local["Your Machine"]
+        Daemon["Daemon<br/>localhost:7331"]
+        CF["cloudflared<br/>process"]
+    end
+
+    subgraph Cloudflare["Cloudflare Edge"]
+        Edge["Cloudflare Edge<br/>TLS termination"]
+    end
+
+    subgraph Cloud["Bolna AI"]
+        BolnaLLM["Custom LLM calls"]
+        BolnaFn["Custom Function calls"]
+    end
+
+    Daemon <-->|"localhost"| CF
+    CF <-->|"encrypted tunnel<br/>(outbound only)"| Edge
+    Edge <-->|"HTTPS"| BolnaLLM
+    Edge <-->|"HTTPS"| BolnaFn
+
+    style CF fill:#f48c06,color:#fff
+    style Edge fill:#0077b6,color:#fff
+```
+
+> **Key insight:** cloudflared creates an outbound-only connection from your machine to Cloudflare's edge. No open ports, no firewall rules needed. Bolna hits `https://random-words.trycloudflare.com` and Cloudflare routes it through the tunnel to your local daemon.
+
 Bolna (cloud) needs to reach the daemon (localhost). Options:
 
 ### 11.1 Cloudflare Tunnel (Recommended)
@@ -1455,6 +1936,28 @@ $ npx @hrushiborhade/pingme init
 
 ## 13. Configuration
 
+```mermaid
+flowchart TB
+    subgraph Load["Config Loading Order (later wins)"]
+        direction TB
+        D["1️⃣ Hardcoded Defaults<br/>getDefaultConfig()"]
+        Y["2️⃣ YAML File<br/>~/.pingme/config.yaml"]
+        E["3️⃣ Environment Variables<br/>PINGME_* overrides"]
+    end
+
+    D -->|"spread merge"| Y
+    Y -->|"deep merge<br/>(nested objects)"| E
+    E --> Final["Final PingmeConfig"]
+
+    subgraph Storage["Config Storage"]
+        direction LR
+        File["~/.pingme/config.yaml<br/>mode: 0o600 (owner only)"]
+        State["~/.pingme/state.json<br/>atomic writes (tmp+rename)"]
+        Hooks["~/.pingme/hooks/pingme.sh<br/>mode: 0o700 (owner exec)"]
+        Logs["~/.pingme/daemon.log<br/>5MB max, 3 rotations"]
+    end
+```
+
 ### 13.1 Config File: `~/.pingme/config.yaml`
 
 ```yaml
@@ -1549,6 +2052,62 @@ PINGME_DAEMON_PORT=7331
 
 ## 14. Security
 
+```mermaid
+flowchart TB
+    subgraph External["External Requests (via Tunnel)"]
+        Bolna["Bolna Custom LLM"]
+        BolnaFn["Bolna Custom Functions"]
+        Webhook["Bolna Webhooks"]
+    end
+
+    subgraph Internal["Internal Requests (localhost)"]
+        Hooks["Hook Scripts<br/>(embed Bearer token)"]
+        CLI["CLI commands<br/>(pingme status, etc.)"]
+    end
+
+    subgraph Auth["Auth Layer"]
+        direction TB
+        BearerCheck{"Bearer token<br/>present?"}
+        TimingSafe["Constant-time<br/>comparison<br/>(fixed-length buffers)"]
+        ExecID{"execution_id<br/>matches active call?"}
+    end
+
+    subgraph Safety["Safety Layer"]
+        direction TB
+        TmuxValid["tmux target<br/>regex validation"]
+        Blocklist["Instruction<br/>blocklist (30+ patterns)"]
+        QueueLimit["Queue depth<br/>limit (200)"]
+        Symlink["Symlink check<br/>on hooks dir"]
+    end
+
+    subgraph Daemon["Daemon"]
+        Routes["Protected Routes<br/>(/sessions, /route, /action, etc.)"]
+        Health["Unprotected<br/>GET /health"]
+        WebhookRoute["/webhooks/bolna"]
+    end
+
+    Bolna --> BearerCheck
+    BolnaFn --> BearerCheck
+    Hooks --> BearerCheck
+    CLI --> BearerCheck
+
+    BearerCheck -->|"Missing"| Reject["401 Unauthorized"]
+    BearerCheck -->|"Present"| TimingSafe
+    TimingSafe -->|"Mismatch"| Reject
+    TimingSafe -->|"Match"| Routes
+
+    Webhook --> ExecID
+    ExecID -->|"No match"| Drop["Ignore (spoofed)"]
+    ExecID -->|"Match"| WebhookRoute
+
+    Routes --> TmuxValid
+    Routes --> Blocklist
+    Routes --> QueueLimit
+
+    style Reject fill:#ff6b6b,color:#fff
+    style Drop fill:#ff6b6b,color:#fff
+```
+
 ### 14.1 Daemon Authentication
 
 The daemon accepts requests from two sources:
@@ -1634,6 +2193,34 @@ function isInstructionSafe(instruction: string): boolean {
 ---
 
 ## 15. Error Handling & Edge Cases
+
+```mermaid
+flowchart TD
+    subgraph Failures["Failure Scenarios"]
+        F1["Daemon down"]
+        F2["Tunnel drops"]
+        F3["Call fails<br/>(no answer / busy)"]
+        F4["Session dies<br/>(no SessionEnd hook)"]
+        F5["Multiple rapid events"]
+        F6["Crash mid-write"]
+    end
+
+    subgraph Recovery["Recovery Mechanisms"]
+        R1["Hook falls back to<br/>SMS via sms-fallback.sh"]
+        R2["Health check every 30s<br/>auto-restart cloudflared"]
+        R3["Webhook detects no-answer<br/>→ SMS fallback"]
+        R4["Stale session cleanup<br/>every 5min (30min TTL)"]
+        R5["Debounce timer batches<br/>into single call"]
+        R6["Atomic writes<br/>(tmp file + rename)"]
+    end
+
+    F1 --> R1
+    F2 --> R2
+    F3 --> R3
+    F4 --> R4
+    F5 --> R5
+    F6 --> R6
+```
 
 ### 15.1 Daemon Not Running
 
