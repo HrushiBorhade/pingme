@@ -40,11 +40,11 @@ export const ALL_EVENTS: HookEventDef[] = [
     spammy: false,
   },
   {
-    event: 'PostToolUse',
+    event: 'PreToolUse',
     scriptArg: 'question',
     emoji: '❓',
     label: 'Asking question',
-    description: 'Agent is asking you a question',
+    description: 'Agent is about to ask you a question (fires before question is shown)',
     defaultEnabled: true,
     matcher: 'AskUserQuestion',
     spammy: false,
